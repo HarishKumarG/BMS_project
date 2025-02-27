@@ -1,7 +1,6 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from BMS_app.views import UserView, MovieView, TheatreView, BookingView, ScreenView, ShowView, PaymentView, \
-    SeatLayoutView, CancelBookingView, SeatSelectionView
+from BMS_app.views import UserView, MovieView, TheatreView, BookingView, ScreenView, ShowView, PaymentView, SeatView
 
 router = DefaultRouter()
 router.register(r'users', UserView)
@@ -11,9 +10,8 @@ router.register(r'screens', ScreenView)
 router.register(r'shows', ShowView)
 router.register(r'bookings', BookingView)
 router.register(r'payments', PaymentView)
-router.register(r'seats', SeatLayoutView)
+router.register(r'seats', SeatView)
+
 urlpatterns = [
     path('', include(router.urls)),
-    path('bookings/<int:pk>/cancel/', CancelBookingView.as_view(), name='cancel-booking'),
-    path('shows/<int:pk>/seats/', SeatSelectionView.as_view(), name='seat-selection'),
 ]

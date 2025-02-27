@@ -71,6 +71,22 @@ class Show(models.Model):
     def __str__(self):
         return f"Show {self.show_number} - {self.movie.title} in {self.screen}"
 
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        self.generate_seats()
+
+    def generate_seats(self):
+        """Generate seats automatically based on the theatre's capacity."""
+        Seat.objects.filter(show=self).delete()  # Clear existing seats if regenerating
+        rows = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        seats_per_row = 10  # Adjust based on theatre layout
+        total_seats = min(self.theatre.noofseats, self.total_tickets)
+
+        for i in range(total_seats):
+            row = rows[i // seats_per_row]
+            seat_num = f"{row}{(i % seats_per_row) + 1}"
+            Seat.objects.create(show=self, seat_number=seat_num)
+
     def reduce_available_seats(self, no_of_seats):
         if self.available_seats >= no_of_seats:
             self.available_seats -= no_of_seats
@@ -83,15 +99,18 @@ class Booking(models.Model):
     nooftickets = models.PositiveIntegerField(validators=[MinValueValidator(1), MaxValueValidator(10)])
     theatre = models.ForeignKey("Theatre", on_delete=models.CASCADE, related_name='booking_theatre')
     show = models.ForeignKey("Show", on_delete=models.CASCADE, related_name='booking_show')
-    selected_seats = models.ManyToManyField("Seat")
+    seats = models.ManyToManyField("Seat", related_name="booked_seats")
 
     def __str__(self):
         return f"{self.id} {self.booking_name} Show: {self.show.show_number} Theatre: {self.theatre.theatre_name}"
 
     def cancel_booking(self):
         if self.show:
+            for seat in self.seats.all():
+                seat.is_booked = False
+                seat.save()
+
             self.show.available_seats += self.nooftickets
-            self.selected_seats.update(status='available')
             self.show.save()
             self.delete()
 
@@ -122,13 +141,12 @@ class Payment(models.Model):
         return f"Payment {self.id} by User: {self.user.username} - {self.status}"
 
 class Seat(models.Model):
-    show = models.ForeignKey(Show, related_name='seats', on_delete=models.CASCADE)
-    row = models.PositiveIntegerField()
-    column = models.PositiveIntegerField()
+    show = models.ForeignKey("Show", on_delete=models.CASCADE, related_name="seats")
+    seat_number = models.CharField(max_length=5)
     is_booked = models.BooleanField(default=False)
 
     class Meta:
-        unique_together = ('show', 'row', 'column')
+        unique_together = ("show", "seat_number")
 
     def __str__(self):
-        return f"Seat {self.row}-{self.column} for Show {self.show.id}"
+        return f"{self.seat_number} - {'Booked' if self.is_booked else 'Available'}"

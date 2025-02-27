@@ -23,39 +23,43 @@ class ScreenSerializer(serializers.ModelSerializer):
         model = Screen
         fields = '__all__'
 
-
-class SeatSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Seat
-        fields = ['id', 'row', 'column', 'is_booked']
-
 class ShowSerializer(serializers.ModelSerializer):
-    seats = SeatSerializer(many=True, read_only=True)
     class Meta:
         model = Show
         fields = '__all__'
 
     def validate(self, data):
         screen = data.get('screen')
+        theatre = data.get('theatre')
         show_time = data.get('show_time')
 
+        # Ensure the selected screen belongs to the selected theatre
+        if screen and screen.theatre != theatre:
+            raise serializers.ValidationError(
+                f"The selected Screen {screen.screen_number} does not belong to Theatre '{theatre.theatre_name}'.")
+
+        # Check if a show is already scheduled at this time on the same screen
         if Show.objects.filter(screen=screen, show_time=show_time).exists():
             raise serializers.ValidationError("Another show is already scheduled at this time on this screen.")
+
+        if show_time <= timezone.now():
+            raise serializers.ValidationError("Show time must be in the future.")
+
         return data
 
-    def validate_show_time(self, value):
-        if value <= timezone.now():
-            raise serializers.ValidationError("Show time must be in the future.")
-        return value
-
+class SeatSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Seat
+        fields = ['id', 'show', 'seat_number', 'is_booked']
 
 class BookingSerializer(serializers.ModelSerializer):
-    booking_price = serializers.SerializerMethodField()
-    selected_seats = serializers.ListField(child=serializers.IntegerField(), required=True)
+    booking_price = serializers.SerializerMethodField(read_only=True)
+    seats = SeatSerializer(many=True, read_only=True)
+    selected_seats = serializers.ListField(child=serializers.CharField(), write_only=True)
 
     class Meta:
         model = Booking
-        fields = ['id', 'booking_name', 'booking_price', 'nooftickets', 'show', 'selected_seats']
+        fields = ['id','booking_name', 'theatre', 'show', 'selected_seats','seats', 'nooftickets', 'booking_price']
 
     def get_booking_price(self, obj):
         return obj.nooftickets * obj.show.ticket_price
@@ -64,44 +68,38 @@ class BookingSerializer(serializers.ModelSerializer):
         theatre = data.get('theatre')
         show = data.get('show')
         selected_seats = data.get('selected_seats')
+        nooftickets = len(selected_seats)
 
         if show.theatre != theatre:
-            raise serializers.ValidationError(f"Wrong Show '{show}' selected for the theatre '{theatre}'")
+            raise serializers.ValidationError(f"Selected show '{show}' does not belong to the theatre '{theatre}'.")
 
-        seats = Seat.objects.filter(id__in=selected_seats, show=show)
-        if len(seats) != len(selected_seats):
-            raise serializers.ValidationError("Some of the selected seats are not available or do not exist.")
+        available_seats = Seat.objects.filter(show=show, seat_number__in=selected_seats, is_booked=False)
+        if len(available_seats) != nooftickets:
+            raise serializers.ValidationError("Some selected seats are already booked or invalid.")
 
-        # Ensure seats are available
-        for seat in seats:
-            if seat.status != 'available':
-                raise serializers.ValidationError(f"Seat {seat.row}{seat.column} is already booked.")
         return data
 
     def create(self, validated_data):
         selected_seats = validated_data.pop('selected_seats')
-        booking = super().create(validated_data)
+        validated_data['nooftickets'] = len(selected_seats)
+        booking = Booking.objects.create(**validated_data)
 
-        # Change seat status to 'booked'
-        seats = Seat.objects.filter(id__in=selected_seats)
-        seats.update(status='booked')
+        seats = Seat.objects.filter(show=booking.show, seat_number__in=selected_seats, is_booked=False)
+        for seat in seats:
+            seat.is_booked = True
+            seat.save()
+            booking.seats.add(seat)
 
-        booking.selected_seats.set(seats)
         return booking
 
 
 class PaymentSerializer(serializers.ModelSerializer):
-    amount = serializers.SerializerMethodField()
+    booking_name = serializers.CharField(source="booking.booking_name_display", read_only=True)
+    theatre = serializers.CharField(source="booking.theatre_name", read_only=True)
+    show = serializers.CharField(source="booking.show_name", read_only=True)
 
     class Meta:
         model = Payment
-        fields = '__all__'
+        fields = ['id', 'user', 'booking', 'booking_name', 'theatre', 'show', 'amount', 'payment_method', 'status', 'transaction_id']
 
-    def get_amount(self, obj):
-        return obj.amount
-
-    def get_booking_price(self, obj):
-        if obj.booking:
-            return obj.booking.nooftickets * obj.booking.show.ticket_price
-        return None
 

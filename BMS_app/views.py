@@ -1,11 +1,11 @@
 import uuid
+from django.db import transaction
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.views import APIView
-
 from .models import User, Movie, Theatre, Screen, Show, Booking, Payment, Seat
-from .serializer import UserSerializer, MovieSerializer, TheatreSerializer, ShowSerializer, BookingSerializer, ScreenSerializer, PaymentSerializer, SeatSerializer
+from .serializer import UserSerializer, MovieSerializer, TheatreSerializer, ShowSerializer, BookingSerializer, \
+    ScreenSerializer, PaymentSerializer, SeatSerializer
 
 
 class UserView(viewsets.ModelViewSet):
@@ -39,25 +39,24 @@ class BookingView(viewsets.ModelViewSet):
 
         if serializer.is_valid():
             show = serializer.validated_data['show']
-            no_of_tickets = serializer.validated_data['nooftickets']
+            selected_seats = serializer.validated_data['selected_seats']
 
-            if show.reduce_available_seats(no_of_tickets):
-                self.perform_create(serializer)
-                return Response(
-                    {"message": "Booking Initiated! Complete the payment!", "data": serializer.data},
-                    status=status.HTTP_201_CREATED
-                )
-            else:
-                if show.available_seats <= 0:
-                    return Response(
-                        {"error": "All seats are booked for this show."},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-                else:
-                    return Response(
-                        {"error": f"Only {show.available_seats} seats are available for this show."},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
+            with transaction.atomic():
+                show.refresh_from_db()
+                available_seats = Seat.objects.filter(show=show, seat_number__in=selected_seats, is_booked=False)
+                if len(available_seats) != len(selected_seats):
+                    return Response({"error": "Some selected seats are already booked or invalid."},
+                                    status=status.HTTP_400_BAD_REQUEST)
+
+                booking = serializer.save()
+                for seat in available_seats:
+                    seat.is_booked = True
+                    seat.save()
+                    booking.seats.add(seat)
+
+            return Response({"message": "Booking successful!", "data": BookingSerializer(booking).data},
+                            status=status.HTTP_201_CREATED)
+
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=['get', 'post'])
@@ -69,6 +68,7 @@ class BookingView(viewsets.ModelViewSet):
         except Booking.DoesNotExist:
             return Response({"error": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
 
+
 class PaymentView(viewsets.ModelViewSet):
     queryset = Payment.objects.all()
     serializer_class = PaymentSerializer
@@ -76,7 +76,6 @@ class PaymentView(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         data = request.data
         booking_id = data.get("booking")
-        amount = data.get("amount")
 
         try:
             booking = Booking.objects.get(id=booking_id)
@@ -86,124 +85,51 @@ class PaymentView(viewsets.ModelViewSet):
         if Payment.objects.filter(booking=booking).exists():
             return Response({"error": "Payment already exists for this booking"}, status=status.HTTP_400_BAD_REQUEST)
 
-        if not amount:
-            amount = booking.nooftickets * booking.show.ticket_price
-
         transaction_id = str(uuid.uuid4())
+
+        # Calculate amount dynamically
+        amount = booking.nooftickets * booking.show.ticket_price
 
         payment = Payment.objects.create(
             user=booking.booking_name,
             booking=booking,
-            amount=amount,
+            amount=amount,  # Use calculated amount
             payment_method=data.get("payment_method"),
             status=data.get("status"),
             transaction_id=transaction_id,
         )
-        if payment.status == "completed":
-            return Response(
-                {"message": "Payment successful! Booking Confirmed", "data": PaymentSerializer(payment).data},
-                status=status.HTTP_201_CREATED
-            )
-        else:
-            return Response(
-                {"message": "Payment not confirmed!", "data": PaymentSerializer(payment).data},
-                status=status.HTTP_201_CREATED
-            )
 
+        message = "Payment successful! Booking Confirmed" if payment.status == "completed" else "Payment not confirmed!"
 
-class SeatLayoutView(viewsets.ModelViewSet):
+        return Response(
+            {"message": message, "data": PaymentSerializer(payment).data},
+            status=status.HTTP_201_CREATED
+        )
+
+class SeatView(viewsets.ModelViewSet):
     queryset = Seat.objects.all()
     serializer_class = SeatSerializer
 
     def get_queryset(self):
-        """
-        Override get_queryset to filter seats by the show.
-        """
-        show_id = self.kwargs.get('pk')  # This assumes that the pk is the show ID.
-        return Seat.objects.filter(show_id=show_id)
+        show_id = self.request.query_params.get('show_id')
+        if show_id:
+            return Seat.objects.filter(show_id=show_id)
+        return Seat.objects.all()
 
-    def list(self, request, *args, **kwargs):
-        """
-        Handle the list view for seats. This will return all seats for the specified show.
-        """
-        show_id = kwargs.get('pk')
-        try:
-            show = Show.objects.get(pk=show_id)
-        except Show.DoesNotExist:
-            return Response({"error": "Show not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        seats = self.get_queryset()
+    @action(detail=False, methods=['get'])
+    def available_seats(self, request):
+        show_id = request.query_params.get('show_id')
+        if not show_id:
+            return Response({"error": "Show ID is required"}, status=400)
+        seats = Seat.objects.filter(show_id=show_id, is_booked=False)
         serializer = self.get_serializer(seats, many=True)
         return Response(serializer.data)
 
-    def create(self, request, *args, **kwargs):
-        """
-        Handle seat creation. We assume that the seat information (row, column) is passed in.
-        """
-        show_id = kwargs.get('pk')
-        try:
-            show = Show.objects.get(pk=show_id)
-        except Show.DoesNotExist:
-            return Response({"error": "Show not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        # Add show_id to the request data before passing to the serializer
-        request.data['show'] = show.id
-        return super().create(request, *args, **kwargs)
-
-
-class BookingView(viewsets.ModelViewSet):
-    queryset = Booking.objects.all()  # This will be used by the viewset for list, create, etc.
-    serializer_class = BookingSerializer
-
-    # Custom Create method (you can keep it if you need to customize further)
-    def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-
-        if serializer.is_valid():
-            self.perform_create(serializer)
-            return Response(
-                {"message": "Booking confirmed!", "data": serializer.data},
-                status=status.HTTP_201_CREATED
-            )
-
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-class CancelBookingView(APIView):
-    def post(self, request, pk):
-        try:
-            booking = Booking.objects.get(pk=pk)
-            booking.cancel_booking()
-            return Response({"message": "Booking canceled and seats reverted to available."}, status=status.HTTP_200_OK)
-        except Booking.DoesNotExist:
-            return Response({"error": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
-
-class SeatSelectionView(APIView):
-    def get(self, request, pk=None):
-        try:
-            show = Show.objects.get(pk=pk)
-        except Show.DoesNotExist:
-            return Response({"error": "Show not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        seats = Seat.objects.filter(show=show)
-        serializer = SeatSerializer(seats, many=True)
+    @action(detail=False, methods=['get'])
+    def booked_seats(self, request):
+        show_id = request.query_params.get('show_id')
+        if not show_id:
+            return Response({"error": "Show ID is required"}, status=400)
+        seats = Seat.objects.filter(show_id=show_id, is_booked=True)
+        serializer = self.get_serializer(seats, many=True)
         return Response(serializer.data)
-
-    def post(self, request, pk=None):
-        try:
-            show = Show.objects.get(pk=pk)
-        except Show.DoesNotExist:
-            return Response({"error": "Show not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        seat_id = request.data.get("seat_id")
-        try:
-            seat = Seat.objects.get(pk=seat_id, show=show)
-        except Seat.DoesNotExist:
-            return Response({"error": "Seat not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        if seat.is_booked:
-            return Response({"error": "Seat already booked."}, status=status.HTTP_400_BAD_REQUEST)
-
-        seat.is_booked = True
-        seat.save()
-
-        return Response({"message": "Seat booked successfully!"}, status=status.HTTP_200_OK)
