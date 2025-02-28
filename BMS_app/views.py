@@ -18,8 +18,6 @@ from django.db import connection
 import time
 redis_instance = redis.StrictRedis(host='127.0.0.1', port=6379, db=1)
 
-
-
 class UserView(viewsets.ModelViewSet):
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsAuthenticated]
@@ -201,5 +199,7 @@ class LoginView(APIView):
             return Response({'access_token': token}, status=status.HTTP_200_OK)
 
         return Response({'error': 'Invalid credentials'}, status=status.HTTP_400_BAD_REQUEST)
+
+
 
 

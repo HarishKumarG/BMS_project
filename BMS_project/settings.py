@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'phonenumber_field',
     'BMS_app',
+    'drf_redesign',
     'rest_framework',
     'rest_framework.authtoken',
 ]
@@ -163,5 +164,7 @@ REST_FRAMEWORK = {
         'user': '1000/day'
     },
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 10,
+    'PAGE_SIZE': 5,
+
+    'DATETIME_FORMAT': "%d-%m-%Y %H:%M:%S",
 }
