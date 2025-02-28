@@ -72,8 +72,11 @@ class Show(models.Model):
         return f"Show {self.show_number} - {self.movie.title} in {self.screen}"
 
     def save(self, *args, **kwargs):
+        is_new = self._state.adding  # Check if it's a new instance
         super().save(*args, **kwargs)
-        self.generate_seats()
+
+        if is_new:  # Generate seats only if this is a new show
+            self.generate_seats()
 
     def generate_seats(self):
         """Generate seats automatically based on the theatre's capacity."""

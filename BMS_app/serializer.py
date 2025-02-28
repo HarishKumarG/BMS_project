@@ -26,7 +26,7 @@ class ScreenSerializer(serializers.ModelSerializer):
 class ShowSerializer(serializers.ModelSerializer):
     class Meta:
         model = Show
-        fields = '__all__'
+        fields = ['id', 'show_number', 'theatre', 'screen', 'movie', 'show_time', 'total_tickets', 'ticket_price', 'available_seats' ]
 
     def validate(self, data):
         screen = data.get('screen')
@@ -50,16 +50,16 @@ class ShowSerializer(serializers.ModelSerializer):
 class SeatSerializer(serializers.ModelSerializer):
     class Meta:
         model = Seat
-        fields = ['id', 'show', 'seat_number', 'is_booked']
+        fields = ['id', 'seat_number', 'is_booked']
 
 class BookingSerializer(serializers.ModelSerializer):
-    booking_price = serializers.SerializerMethodField(read_only=True)
+    booking_price = serializers.SerializerMethodField()
     seats = SeatSerializer(many=True, read_only=True)
     selected_seats = serializers.ListField(child=serializers.CharField(), write_only=True)
 
     class Meta:
         model = Booking
-        fields = ['id','booking_name', 'theatre', 'show', 'selected_seats','seats', 'nooftickets', 'booking_price']
+        fields = ['id','booking_name', 'theatre', 'show', 'nooftickets', 'selected_seats', 'seats', 'booking_price']
 
     def get_booking_price(self, obj):
         return obj.nooftickets * obj.show.ticket_price
@@ -94,12 +94,16 @@ class BookingSerializer(serializers.ModelSerializer):
 
 
 class PaymentSerializer(serializers.ModelSerializer):
-    booking_name = serializers.CharField(source="booking.booking_name_display", read_only=True)
-    theatre = serializers.CharField(source="booking.theatre_name", read_only=True)
-    show = serializers.CharField(source="booking.show_name", read_only=True)
+    amount = serializers.SerializerMethodField()
 
     class Meta:
         model = Payment
-        fields = ['id', 'user', 'booking', 'booking_name', 'theatre', 'show', 'amount', 'payment_method', 'status', 'transaction_id']
+        fields = ['id', 'user', 'booking', 'amount', 'payment_method', 'transaction_id', 'created_at', 'status']
 
+    def get_amount(self, obj):
+        return obj.amount
 
+    def get_booking_price(self, obj):
+        if obj.booking:
+            return obj.booking.nooftickets * obj.booking.show.ticket_price
+        return None
