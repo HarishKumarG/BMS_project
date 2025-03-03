@@ -1,17 +1,28 @@
+from django.contrib.auth.hashers import make_password
+from django.contrib.auth.models import AbstractUser, Group, Permission
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
 from phonenumber_field.modelfields import PhoneNumberField
 
-
-class User(models.Model):
+ROLE_CHOICES = (
+    ('customer', 'Customer'),
+    ('manager', 'Manager'),
+)
+class User(AbstractUser):
     username = models.CharField(max_length=30, blank=True)
     email = models.EmailField(unique=True)
     mobile = PhoneNumberField()
     location = models.CharField(max_length=100, blank=True)
     ismember = models.BooleanField(default=False)
+    role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='customer')
+    password = models.CharField(max_length=128, default=make_password("defaultpassword123"))  # Hashed default password
+
+
+    groups = models.ManyToManyField(Group, related_name="custom_user_groups", blank=True)
+    user_permissions = models.ManyToManyField(Permission, related_name="custom_user_permissions", blank=True)
 
     USERNAME_FIELD = 'email'
-    REQUIRED_FIELDS = ['username', 'email', 'mobile']
+    REQUIRED_FIELDS = ['username', 'email', 'mobile', 'password']
 
     class Meta:
         ordering = ["id"]
@@ -79,8 +90,7 @@ class Show(models.Model):
             self.generate_seats()
 
     def generate_seats(self):
-        """Generate seats automatically based on the theatre's capacity."""
-        Seat.objects.filter(show=self).delete()  # Clear existing seats if regenerating
+        Seat.objects.filter(show=self).delete()
         rows = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         seats_per_row = 10  # Adjust based on theatre layout
         total_seats = min(self.theatre.noofseats, self.total_tickets)
@@ -153,3 +163,10 @@ class Seat(models.Model):
 
     def __str__(self):
         return f"{self.seat_number} - {'Booked' if self.is_booked else 'Available'}"
+
+class BlockedSeat(models.Model):
+    show = models.ForeignKey("Show", on_delete=models.CASCADE, related_name="blocked_seats")
+    seat = models.ForeignKey("Seat", on_delete=models.CASCADE, related_name="blocked_in_show")
+
+    def __str__(self):
+        return f"Blocked: {self.seat.seat_number} in Show {self.show.id}"

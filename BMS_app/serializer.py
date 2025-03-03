@@ -1,12 +1,18 @@
 from django.utils import timezone
 from rest_framework import serializers
-from BMS_app.models import User, Movie, Theatre, Show, Booking, Screen, Payment, Seat
+from BMS_app.models import User, Movie, Theatre, Show, Booking, Screen, Payment, Seat, BlockedSeat
+from django.contrib.auth.hashers import make_password
 
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = '__all__'
+        fields = ['id', 'username', 'email', 'mobile', 'location', 'role', 'password']
+        extra_kwargs = {'password': {'write_only': True}}
+
+    def create(self, validated_data):
+        validated_data['password'] = make_password(validated_data['password'])
+        return super().create(validated_data)
 
 class MovieSerializer(serializers.ModelSerializer):
     class Meta:
@@ -24,30 +30,20 @@ class ScreenSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class ShowSerializer(serializers.ModelSerializer):
-    theatre = TheatreSerializer(read_only=True)
-    screen  = ScreenSerializer(read_only=True)
-    movie = MovieSerializer(read_only=True)
-    theatre_id = serializers.PrimaryKeyRelatedField(
-        queryset=Theatre.objects.all(), source="theatre", write_only=True
-    )
-    screen_id = serializers.PrimaryKeyRelatedField(queryset=Screen.objects.all(), source="screen", write_only=True)
-    movie_id = serializers.PrimaryKeyRelatedField(queryset=Movie.objects.all(), source="movie", write_only=True)
+    show_time = serializers.DateTimeField(format="%d-%m-%Y %H:%M:%S")
     class Meta:
         model = Show
-        fields = ['id', 'show_number', 'theatre', 'screen', 'movie', 'show_time', 'total_tickets', 'ticket_price',
-                  'available_seats', 'theatre_id', 'screen_id', 'movie_id']
+        fields = ['id', 'show_number', 'theatre', 'screen', 'movie', 'show_time', 'total_tickets', 'ticket_price', 'available_seats' ]
 
     def validate(self, data):
         screen = data.get('screen')
         theatre = data.get('theatre')
         show_time = data.get('show_time')
 
-        # Ensure the selected screen belongs to the selected theatre
         if screen and screen.theatre != theatre:
             raise serializers.ValidationError(
                 f"The selected Screen {screen.screen_number} does not belong to Theatre '{theatre.theatre_name}'.")
 
-        # Check if a show is already scheduled at this time on the same screen
         if Show.objects.filter(screen=screen, show_time=show_time).exists():
             raise serializers.ValidationError("Another show is already scheduled at this time on this screen.")
 
@@ -68,15 +64,9 @@ class BookingSerializer(serializers.ModelSerializer):
     show = ShowSerializer(read_only=True)
     seats = SeatSerializer(many=True, read_only=True)
 
-    booking_name_id = serializers.PrimaryKeyRelatedField(
-        queryset=User.objects.all(), source="booking_name", write_only=True
-    )
-    theatre_id = serializers.PrimaryKeyRelatedField(
-        queryset=Theatre.objects.all(), source="theatre", write_only=True
-    )
-    show_id = serializers.PrimaryKeyRelatedField(
-        queryset=Show.objects.all(), source="show", write_only=True
-    )
+    booking_name_id = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), source="booking_name", write_only=True)
+    theatre_id = serializers.PrimaryKeyRelatedField(queryset=Theatre.objects.all(), source="theatre", write_only=True)
+    show_id = serializers.PrimaryKeyRelatedField(queryset=Show.objects.all(), source="show", write_only=True)
     selected_seats = serializers.ListField(child=serializers.CharField(), write_only=True)
 
     booking_price = serializers.SerializerMethodField()
@@ -138,3 +128,8 @@ class PaymentSerializer(serializers.ModelSerializer):
         if obj.booking:
             return obj.booking.nooftickets * obj.booking.show.ticket_price
         return None
+
+class BlockedSeatSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BlockedSeat
+        fields = "__all__"

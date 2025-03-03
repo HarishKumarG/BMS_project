@@ -2,6 +2,8 @@ import jwt
 from django.conf import settings
 from django.contrib.auth.models import User
 from rest_framework import authentication, exceptions
+from django.contrib.auth.backends import ModelBackend
+from .models import User
 
 class CustomJWTAuthentication(authentication.BaseAuthentication):
     def authenticate(self, request):
@@ -28,3 +30,13 @@ class CustomJWTAuthentication(authentication.BaseAuthentication):
             raise exceptions.AuthenticationFailed('User not found')
 
         return (user, token)
+
+
+class EmailBackend(ModelBackend):
+    def authenticate(self, request, username=None, password=None, **kwargs):
+        try:
+            user = User.objects.get(email=username)
+            if user.check_password(password):  # Validate password
+                return user
+        except User.DoesNotExist:
+            return None
