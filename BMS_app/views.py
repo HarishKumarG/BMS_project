@@ -1,6 +1,7 @@
 import functools
 import uuid
 import redis
+from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.utils import timezone
 from django.db import transaction
@@ -10,10 +11,10 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from .authentication import CustomJWTAuthentication
-from .models import User, Movie, Theatre, Screen, Show, Booking, Payment, Seat, BlockedSeat
+from .models import User, Movie, Theatre, Screen, Show, Booking, Payment, Seat, BlockedSeat, Rating
 from .permissions import IsCustomer, IsManager, IsCustomerOrManager
 from .serializer import UserSerializer, MovieSerializer, TheatreSerializer, ShowSerializer, BookingSerializer, \
-    ScreenSerializer, PaymentSerializer, SeatSerializer, BlockedSeatSerializer
+    ScreenSerializer, PaymentSerializer, SeatSerializer, BlockedSeatSerializer, RatingSerializer
 from .utils import generate_jwt
 from django.core.cache import cache
 from django.db import connection
@@ -34,6 +35,12 @@ class MovieView(viewsets.ModelViewSet):
     queryset = Movie.objects.all()
     serializer_class =MovieSerializer
 
+class RatingViewset(viewsets.ModelViewSet):
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated, IsCustomerOrManager]
+    queryset = Rating.objects.all()
+    serializer_class = RatingSerializer
+
 class TheatreView(viewsets.ModelViewSet):
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsAuthenticated, IsManager]
@@ -51,6 +58,23 @@ class ShowView(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, IsManager]
     queryset = Show.objects.all()
     serializer_class = ShowSerializer
+
+    def validate(self, data):
+        screen = data.get('screen')
+        theatre = data.get('theatre')
+        show_time = data.get('show_time')
+
+        if screen and screen.theatre != theatre:
+            raise serializers.ValidationError(
+                f"The selected Screen {screen.screen_number} does not belong to Theatre '{theatre.theatre_name}'.")
+
+        if Show.objects.filter(screen=screen, show_time=show_time).exists():
+            raise serializers.ValidationError("Another show is already scheduled at this time on this screen.")
+
+        if show_time <= timezone.now():
+            raise serializers.ValidationError("Show time must be in the future.")
+
+        return data
 
 #customer views
 class MovieSearchView(APIView):
@@ -116,9 +140,9 @@ class BookingView(viewsets.ModelViewSet):
                     return Response({"error": "Some selected seats are blocked"},
                                     status=status.HTTP_400_BAD_REQUEST)
 
-                available_seats = Seat.objects.filter(show=show, seat_number__in=selected_seats, is_booked=False)
+                available_seats = Seat.objects.select_for_update().filter(show=show, seat_number__in=selected_seats,is_booked=False)
                 if len(available_seats) != len(selected_seats):
-                    return Response({"error": "Some selected seats are already booked or invalid."},
+                    return Response({"error": "Some selected seats are already booked or invalid"},
                                     status=status.HTTP_400_BAD_REQUEST)
 
                 booking = serializer.save()
@@ -126,8 +150,6 @@ class BookingView(viewsets.ModelViewSet):
                     seat.is_booked = True
                     seat.save()
                     booking.seats.add(seat)
-                show.available_seats -= len(selected_seats)
-                show.save()
 
             return Response({"message": "Booking successful!", "data": BookingSerializer(booking).data},
                             status=status.HTTP_201_CREATED)
@@ -294,13 +316,12 @@ class BlockedSeatView(viewsets.ModelViewSet):
     queryset = BlockedSeat.objects.all()
     serializer_class = BlockedSeatSerializer
 
-    def reduce_available_seats(self, show):
-        blocked_seats_count = BlockedSeat.objects.filter(show=show).count()
-        show.available_seats -= blocked_seats_count
+    def reduce_available_seats(self, show, new_blocked_count):
+        show.available_seats -= new_blocked_count
         show.save()
-    def increase_available_seats(self, show):
-        blocked_seats_count = BlockedSeat.objects.filter(show=show).count()
-        show.available_seats += blocked_seats_count
+
+    def increase_available_seats(self, show, removed_seats_count):
+        show.available_seats = min(show.available_seats + removed_seats_count, show.total_tickets)
         show.save()
 
     @action(detail=False, methods=["POST"])
@@ -316,11 +337,9 @@ class BlockedSeatView(viewsets.ModelViewSet):
         except Show.DoesNotExist:
             return Response({"error": "Invalid show ID."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Find seats in the given show
         seats = Seat.objects.filter(show=show, seat_number__in=seat_numbers)
         found_seat_numbers = set(seat.seat_number for seat in seats)
 
-        # Identify missing seats
         missing_seats = list(set(seat_numbers) - found_seat_numbers)
         if missing_seats:
             return Response(
@@ -328,15 +347,12 @@ class BlockedSeatView(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Identify already blocked seats
         already_blocked = BlockedSeat.objects.filter(show=show, seat__in=seats).values_list("seat__seat_number", flat=True)
         new_seats_to_block = [seat for seat in seats if seat.seat_number not in already_blocked]
 
-        # Block only new seats
         BlockedSeat.objects.bulk_create([BlockedSeat(show=show, seat=seat) for seat in new_seats_to_block])
 
-        # Update available seats count
-        self.reduce_available_seats(show)
+        self.reduce_available_seats(show, len(new_seats_to_block))
 
         return Response(
             {
@@ -347,27 +363,29 @@ class BlockedSeatView(viewsets.ModelViewSet):
             status=status.HTTP_201_CREATED,
         )
 
-    @action(detail=False, methods=["GET", "POST"])
+    @action(detail=False, methods=["POST"])
     def remove_blocked(self, request):
         show_id = request.data.get("show")
-        seat_number = request.data.get("seats", [])
+        seat_numbers = request.data.get("seats", [])
 
-        if not show_id or not seat_number:
-            return Response({"error": "Show ID and seat number are required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not show_id or not seat_numbers:
+            return Response({"error": "Show ID and at least one seat number are required."},
+                            status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            blocked_seat = BlockedSeat.objects.get(show_id=show_id, seat__seat_number=seat_number)
-        except BlockedSeat.DoesNotExist:
-            return Response({"error": f"Seat {seat_number} is not marked as blocked."}, status=status.HTTP_400_BAD_REQUEST)
+        if not Show.objects.filter(id=show_id).exists():
+            return Response({"error": "Invalid show ID."}, status=status.HTTP_400_BAD_REQUEST)
 
-        blocked_seat.delete()
+        blocked_seats = BlockedSeat.objects.filter(show_id=show_id, seat__seat_number__in=seat_numbers)
 
-        # Update available seats count
+        if not blocked_seats.exists():
+            return Response({"error": "None of the selected seats are marked as blocked."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        removed_count = blocked_seats.count()
+        print(f"Removing {removed_count} blocked seats from Show {show_id}")  # Debugging
+        blocked_seats.delete()
+
         show = Show.objects.get(id=show_id)
-        self.increase_available_seats(show)
+        self.increase_available_seats(show, removed_count)
 
-        return Response({"message": f"Blocked seat {seat_number} removed."}, status=status.HTTP_200_OK)
-
-
-
-
+        return Response({"message": f"Blocked seats {seat_numbers} removed successfully."}, status=status.HTTP_200_OK)

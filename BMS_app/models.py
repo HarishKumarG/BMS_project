@@ -26,6 +26,7 @@ class User(AbstractUser):
 
     class Meta:
         ordering = ["id"]
+        db_table = "User_details"
 
     def __str__(self):
         return self.username
@@ -34,13 +35,31 @@ class Movie(models.Model):
     title = models.CharField(max_length=100)
     language = models.CharField()
     genre = models.CharField()
+    certificate = models.CharField(default="U")
 
     class Meta:
         ordering = ["id"]
         unique_together = (('title', 'language'),)
+        db_table = "Movie_details"
+
 
     def __str__(self):
         return self.title
+
+class Rating(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="ratings")
+    movie = models.ForeignKey(Movie, on_delete=models.CASCADE, related_name="ratings")
+    rating = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(100)])
+    review = models.TextField(blank=True, null=True)
+
+    class Meta:
+        ordering = ["id"]
+        unique_together = (('user', 'movie'),)
+        db_table = "Rating_details"
+
+    def __str__(self):
+        return f"{self.movie.title} - Rating: {self.rating}"
+
 
 class Theatre(models.Model):
     theatre_name = models.CharField()
@@ -50,6 +69,8 @@ class Theatre(models.Model):
     class Meta:
         ordering = ["id"]
         unique_together = (('theatre_name', 'location'),)
+        db_table = "Theatre_details"
+
 
     def __str__(self):
         return f"Id:{self.id} {self.theatre_name} {self.location}"
@@ -62,6 +83,8 @@ class Screen(models.Model):
     class Meta:
         ordering = ["theatre", "screen_number"]
         unique_together = (('screen_number', 'theatre'),)
+        db_table = "Screen_details"
+
 
     def __str__(self):
         return f"Screen {self.screen_number} - {self.theatre.theatre_name}"
@@ -78,6 +101,8 @@ class Show(models.Model):
     class Meta:
         ordering = ["theatre", "screen", "show_number"]
         unique_together = (('screen', 'show_time', 'theatre'),)
+        db_table = "Show_details"
+
 
     def __str__(self):
         return f"Show {self.show_number} - {self.movie.title} in {self.screen}"
@@ -114,14 +139,15 @@ class Booking(models.Model):
     show = models.ForeignKey("Show", on_delete=models.CASCADE, related_name='booking_show')
     seats = models.ManyToManyField("Seat", related_name="booked_seats")
 
+    class Meta:
+        db_table = "Booking_details"
+
     def __str__(self):
         return f"{self.id} {self.booking_name} Show: {self.show.show_number} Theatre: {self.theatre.theatre_name}"
 
     def cancel_booking(self):
         if self.show:
-            for seat in self.seats.all():
-                seat.is_booked = False
-                seat.save()
+            self.seats.update(is_booked=False)
 
             self.show.available_seats += self.nooftickets
             self.show.save()
@@ -150,6 +176,9 @@ class Payment(models.Model):
     transaction_id = models.CharField(max_length=100, unique=True, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        db_table = "Payment_details"
+
     def __str__(self):
         return f"Payment {self.id} by User: {self.user.username} - {self.status}"
 
@@ -160,6 +189,7 @@ class Seat(models.Model):
 
     class Meta:
         unique_together = ("show", "seat_number")
+        db_table = "Seat_details"
 
     def __str__(self):
         return f"{self.seat_number} - {'Booked' if self.is_booked else 'Available'}"
@@ -168,5 +198,10 @@ class BlockedSeat(models.Model):
     show = models.ForeignKey("Show", on_delete=models.CASCADE, related_name="blocked_seats")
     seat = models.ForeignKey("Seat", on_delete=models.CASCADE, related_name="blocked_in_show")
 
+    class Meta:
+        db_table = "BlockedSeat_details"
     def __str__(self):
         return f"Blocked: {self.seat.seat_number} in Show {self.show.id}"
+
+
+

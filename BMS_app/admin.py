@@ -1,5 +1,5 @@
 from django.contrib import admin
-from BMS_app.models import User, Movie, Theatre, Show, Booking, Payment, Screen, Seat, BlockedSeat
+from BMS_app.models import User, Movie, Theatre, Show, Booking, Payment, Screen, Seat, BlockedSeat, Rating
 
 # Register your models here.
 admin.site.register(User)
@@ -11,3 +11,4 @@ admin.site.register(Booking)
 admin.site.register(Payment)
 admin.site.register(Seat)
 admin.site.register(BlockedSeat)
+admin.site.register(Rating)
