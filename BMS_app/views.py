@@ -74,43 +74,40 @@ class ShowView(viewsets.ModelViewSet):
 class MovieSearchView(APIView):
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsAuthenticated, IsCustomer]
+
     def get(self, request):
-        query = request.query_params.get('q', '')
+        query = request.query_params.get('movie', '')
 
         if not query:
             return Response({"error": "Please provide a movie name to search."}, status=status.HTTP_400_BAD_REQUEST)
 
-        movies = Movie.objects.filter(title__icontains=query)
+        movie = Movie.objects.filter(title__icontains=query).first()
 
-        if not movies.exists():
+        if not movie:
             return Response({"message": "No movies found."}, status=status.HTTP_404_NOT_FOUND)
 
-        results = []
-        for movie in movies:
-            shows = Show.objects.filter(movie=movie)
+        shows = Show.objects.filter(movie=movie).select_related("theatre", "screen")
+        theatre_dict = {}
 
-            show_data = []
-            for show in shows:
-                theatre = show.theatre
-                screen = show.screen
-                show_data.append({
-                    "show_id": show.id,
-                    "show_time": show.show_time,
-                    "available_seats": show.available_seats,
-                    "theatre": {
-                        "id": theatre.id,
-                        "name": theatre.theatre_name,
-                        "location": theatre.location
-                    },
-                    "screen": screen.screen_number
-                })
+        for show in shows:
+            theatre_name = show.theatre.theatre_name
+            if theatre_name not in theatre_dict:
+                theatre_dict[theatre_name] = {"theatre_name": theatre_name, "shows": []}
 
-            results.append({
-                "movie": MovieSerializer(movie).data,
-                "shows": show_data
+            theatre_dict[theatre_name]["shows"].append({
+                "show_time": show.show_time,
+                "available_seats": show.available_seats,
             })
 
-        return Response(results, status=status.HTTP_200_OK)
+        response_data = {
+            "movie_name": movie.title,
+            "language": movie.language,
+            "genre": movie.genre,
+            "certificate": movie.certificate,
+            "theatres": list(theatre_dict.values())
+        }
+
+        return Response(response_data, status=status.HTTP_200_OK)
 
 class BookingView(viewsets.ModelViewSet):
     authentication_classes = [CustomJWTAuthentication]
@@ -285,25 +282,42 @@ class SearchTheaterView(APIView):
     permission_classes = [IsAuthenticated, IsCustomer]
 
     def get(self, request):
-        query = request.query_params.get('q', '')
+        query = request.query_params.get('theatre', '')
+
         if not query:
-            return Response({"error": "Please provide a theater name to search."}, status=400)
+            return Response({"error": "Please provide a theatre name to search."}, status=status.HTTP_400_BAD_REQUEST)
 
-        theaters = Theatre.objects.filter(theatre_name__icontains=query)
+        theatre = Theatre.objects.filter(theatre_name__icontains=query).first()
 
-        if not theaters.exists():
-            return Response({"error": "No matching theaters found."}, status=404)
+        if not theatre:
+            return Response({"message": "No theatres found."}, status=status.HTTP_404_NOT_FOUND)
 
-        results = []
-        for theater in theaters:
-            shows = Show.objects.filter(theatre=theater).select_related('movie')
-            show_data = ShowSerializer(shows, many=True).data
+        shows = Show.objects.filter(theatre=theatre).select_related("movie", "screen")
+        movie_dict = {}
 
-            results.append({
-                "movies_running": show_data
+        for show in shows:
+            movie_title = show.movie.title
+            if movie_title not in movie_dict:
+                movie_dict[movie_title] = {
+                    "title": movie_title,
+                    "language": show.movie.language,
+                    "genre": show.movie.genre,
+                    "certificate": show.movie.certificate,
+                    "shows": []
+                }
+
+            movie_dict[movie_title]["shows"].append({
+                "show_time": show.show_time,
+                "available_seats": show.available_seats,
             })
 
-        return Response(results, status=200)
+        response_data = {
+            "theatre_name": theatre.theatre_name,
+            "location": theatre.location,
+            "movies": list(movie_dict.values())
+        }
+
+        return Response(response_data, status=status.HTTP_200_OK)
 
 class BlockedSeatView(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, IsManager]

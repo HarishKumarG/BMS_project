@@ -72,7 +72,7 @@ class BookingSerializer(serializers.ModelSerializer):
     theatre_name = serializers.CharField(source="theatre.theatre_name", read_only=True)
     theatre_location = serializers.CharField(source="theatre.location", read_only=True)
     show_number = serializers.IntegerField(source="show.id", read_only=True)
-    screen = serializers.IntegerField(source="show.screen_number", read_only=True)
+    screen = serializers.IntegerField(source="show.screen.screen_number", read_only=True)
     movie = serializers.CharField(source="show.movie.title", read_only=True)
     show_time = serializers.DateTimeField(source="show.start_time", format="%d-%m-%Y %H:%M:%S", read_only=True)
     seats = serializers.SerializerMethodField()
@@ -91,7 +91,7 @@ class BookingSerializer(serializers.ModelSerializer):
     class Meta:
         model = Booking
         fields = [
-            "id", "username", "email", "mobile", "theatre_name", "theatre_location", "show_number", "screen", "movie", "show_time",
+            "id", "username", "email", "mobile", "theatre_name", "theatre_location", "movie", "show_number", "screen",  "show_time",
             "nooftickets", "seats", "booking_price", "booking_name_id", "theatre_id", "show_id", "selected_seats"
         ]
 
