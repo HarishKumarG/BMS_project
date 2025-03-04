@@ -21,9 +21,14 @@ class MovieSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class RatingSerializer(serializers.ModelSerializer):
+    user = serializers.CharField(source="booking.booking_name.username", read_only=True)
+    movie = serializers.CharField(source="booking.show.movie.title", read_only=True)
+
     class Meta:
         model = Rating
-        fields = '__all__'
+        fields = ["id", "booking", "user", "movie", "rating", "review"]
+        read_only_fields = ["id", "user", "movie"]
+
 
 class TheatreSerializer(serializers.ModelSerializer):
     class Meta:

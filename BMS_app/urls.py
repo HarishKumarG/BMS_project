@@ -4,7 +4,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from BMS_app.views import UserView, MovieView, TheatreView, ScreenView, ShowView, PaymentView, SeatView, \
-    BookingView, MovieSearchView, LoginView, SearchTheaterView, BlockedSeatView, RatingViewset
+    BookingView, MovieSearchView, LoginView, SearchTheaterView, BlockedSeatView, RatingView
 
 router = DefaultRouter()
 router.register(r'users', UserView)
@@ -16,7 +16,7 @@ router.register(r'bookings', BookingView)
 router.register(r'payments', PaymentView)
 router.register(r'seats', SeatView)
 router.register(r'blocked',BlockedSeatView)
-router.register(r'ratings', RatingViewset)
+router.register(r'ratings', RatingView)
 
 urlpatterns = [
     path('', include(router.urls)),

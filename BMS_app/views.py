@@ -35,12 +35,6 @@ class MovieView(viewsets.ModelViewSet):
     queryset = Movie.objects.all()
     serializer_class =MovieSerializer
 
-class RatingViewset(viewsets.ModelViewSet):
-    authentication_classes = [CustomJWTAuthentication]
-    permission_classes = [IsAuthenticated, IsCustomerOrManager]
-    queryset = Rating.objects.all()
-    serializer_class = RatingSerializer
-
 class TheatreView(viewsets.ModelViewSet):
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsAuthenticated, IsManager]
@@ -389,3 +383,33 @@ class BlockedSeatView(viewsets.ModelViewSet):
         self.increase_available_seats(show, removed_count)
 
         return Response({"message": f"Blocked seats {seat_numbers} removed successfully."}, status=status.HTTP_200_OK)
+
+
+class RatingView(viewsets.ModelViewSet):
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated, IsCustomerOrManager]
+    queryset = Rating.objects.all()
+    serializer_class = RatingSerializer
+
+    def create(self, request, *args, **kwargs):
+        data = request.data
+        booking_id = data.get("booking")
+
+        if not booking_id:
+            return Response({"error": "Booking ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            booking = Booking.objects.get(id=booking_id, booking_name=request.user)
+        except Booking.DoesNotExist:
+            return Response({"error": "Invalid booking or unauthorized access"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if Rating.objects.filter(booking=booking).exists():
+            return Response({"error": "You have already rated this booking"}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = self.get_serializer(data=data)
+        if serializer.is_valid():
+            serializer.save(booking=booking)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+

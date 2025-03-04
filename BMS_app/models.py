@@ -46,21 +46,6 @@ class Movie(models.Model):
     def __str__(self):
         return self.title
 
-class Rating(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="ratings")
-    movie = models.ForeignKey(Movie, on_delete=models.CASCADE, related_name="ratings")
-    rating = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(100)])
-    review = models.TextField(blank=True, null=True)
-
-    class Meta:
-        ordering = ["id"]
-        unique_together = (('user', 'movie'),)
-        db_table = "Rating_details"
-
-    def __str__(self):
-        return f"{self.movie.title} - Rating: {self.rating}"
-
-
 class Theatre(models.Model):
     theatre_name = models.CharField()
     noofseats = models.PositiveIntegerField(validators=[MinValueValidator(0), MaxValueValidator(100)])
@@ -202,6 +187,17 @@ class BlockedSeat(models.Model):
         db_table = "BlockedSeat_details"
     def __str__(self):
         return f"Blocked: {self.seat.seat_number} in Show {self.show.id}"
+
+class Rating(models.Model):
+    booking = models.OneToOneField(Booking, on_delete=models.CASCADE, related_name="rating", default=1)  # Ensures one rating per booking
+    rating = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(10)])
+    review = models.TextField(blank=True, null=True)
+
+    class Meta:
+        db_table = "Rating_details"
+
+    def __str__(self):
+        return f"Rating {self.rating}/10 by {self.booking.booking_name} for {self.booking.show.movie.title}"
 
 
 
